@@ -255,8 +255,7 @@ public class KoLDesktop extends GenericFrame {
     toolbarPanel.add(
         new DisplayFrameButton(
             "Graphical CLI", iconSetPrefix + "command.gif", "CommandDisplayFrame"));
-    toolbarPanel.add(
-        new DisplayFrameButton("Kolmaf-AI", iconSetPrefix + "command.gif", "OpenCodeFrame"));
+    toolbarPanel.add(new DisplayFrameButton("Kolmaf-AI", "OpenCodeFrame"));
 
     toolbarPanel.add(Box.createHorizontalStrut(10));
 
