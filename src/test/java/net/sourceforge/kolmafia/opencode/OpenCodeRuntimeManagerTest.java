@@ -27,6 +27,25 @@ class OpenCodeRuntimeManagerTest {
     assertThat(OpenCodeRuntimeManager.extractAssistantText(payload), is("Hello\nKoLmafia"));
   }
 
+
+  @Test
+  void extractsAssistantTextFromSynchronousMessageResponse() {
+    String payload =
+        """
+        {
+          "info": {"role": "assistant"},
+          "parts": [
+            {"type": "reasoning", "text": "private scratch"},
+            {"type": "text", "text": "KoLmafia OpenCode bridge alive"}
+          ]
+        }
+        """;
+
+    assertThat(
+        OpenCodeRuntimeManager.extractAssistantText(payload),
+        is("KoLmafia OpenCode bridge alive"));
+  }
+
   @Test
   void returnsEmptyStringWhenThereIsNoAssistantMessage() {
     String payload =
