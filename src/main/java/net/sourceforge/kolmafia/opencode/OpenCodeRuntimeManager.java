@@ -12,6 +12,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Base64;
 import java.util.concurrent.TimeUnit;
 import net.sourceforge.kolmafia.KoLConstants;
 import net.sourceforge.kolmafia.RequestLogger;
@@ -23,7 +24,7 @@ public final class OpenCodeRuntimeManager {
   private static final HttpClient HTTP =
       HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build();
 
-  private static Process managedProcess;
+  private static volatile Process managedProcess;
   private static String sessionId;
 
   private OpenCodeRuntimeManager() {}
@@ -33,7 +34,7 @@ public final class OpenCodeRuntimeManager {
   public static Health health() {
     try {
       HttpRequest request =
-          HttpRequest.newBuilder(BASE_URI.resolve("/global/health"))
+          requestBuilder(BASE_URI.resolve("/global/health"))
               .timeout(Duration.ofSeconds(2))
               .GET()
               .build();
@@ -125,7 +126,7 @@ public final class OpenCodeRuntimeManager {
     ensureSuccess(admitted, "send prompt");
 
     HttpRequest waitRequest =
-        HttpRequest.newBuilder(BASE_URI.resolve("/api/experimental/session/" + id + "/wait"))
+        requestBuilder(BASE_URI.resolve("/api/experimental/session/" + id + "/wait"))
             .timeout(Duration.ofMinutes(5))
             .POST(HttpRequest.BodyPublishers.noBody())
             .build();
@@ -134,7 +135,7 @@ public final class OpenCodeRuntimeManager {
     ensureSuccess(waited, "wait for OpenCode response");
 
     HttpRequest messagesRequest =
-        HttpRequest.newBuilder(
+        requestBuilder(
                 BASE_URI.resolve(
                     "/api/session/" + id + "/message?type=assistant&order=desc&limit=1"))
             .timeout(Duration.ofSeconds(10))
@@ -222,12 +223,30 @@ public final class OpenCodeRuntimeManager {
   private static HttpResponse<String> sendJson(String method, String path, String body)
       throws IOException, InterruptedException {
     HttpRequest request =
-        HttpRequest.newBuilder(BASE_URI.resolve(path))
+        requestBuilder(BASE_URI.resolve(path))
             .timeout(Duration.ofSeconds(30))
             .header("Content-Type", "application/json")
             .method(method, HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8))
             .build();
     return HTTP.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+  }
+
+  private static HttpRequest.Builder requestBuilder(URI uri) {
+    HttpRequest.Builder builder = HttpRequest.newBuilder(uri);
+    String password = System.getenv("OPENCODE_SERVER_PASSWORD");
+    if (password == null || password.isEmpty()) {
+      return builder;
+    }
+
+    String username = System.getenv("OPENCODE_SERVER_USERNAME");
+    if (username == null || username.isEmpty()) {
+      username = "opencode";
+    }
+
+    String encoded =
+        Base64.getEncoder()
+            .encodeToString((username + ":" + password).getBytes(StandardCharsets.UTF_8));
+    return builder.header("Authorization", "Basic " + encoded);
   }
 
   private static void ensureSuccess(HttpResponse<String> response, String operation)
