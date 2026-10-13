@@ -100,6 +100,7 @@ public class OpenCodePanel extends JPanel {
         id -> {
           setBusy(false);
           append("runtime", "Created OpenCode session " + id + ".");
+          refreshStatus();
         });
   }
 
