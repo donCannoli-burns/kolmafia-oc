@@ -116,41 +116,53 @@ public final class OpenCodeRuntimeManager {
     requireHealthy();
     String id = ensureSession();
 
-    JSONObject promptPayload = new JSONObject();
-    promptPayload.put("text", prompt);
+    JSONObject textPart = new JSONObject();
+    textPart.put("type", "text");
+    textPart.put("text", prompt);
+
+    JSONArray parts = new JSONArray();
+    parts.add(textPart);
+
     JSONObject body = new JSONObject();
-    body.put("prompt", promptPayload);
+    body.put("parts", parts);
 
-    HttpResponse<String> admitted =
-        sendJson("POST", "/api/session/" + id + "/prompt", body.toJSONString());
-    ensureSuccess(admitted, "send prompt");
-
-    HttpRequest waitRequest =
-        requestBuilder(BASE_URI.resolve("/api/experimental/session/" + id + "/wait"))
+    HttpRequest request =
+        requestBuilder(BASE_URI.resolve("/session/" + id + "/message"))
             .timeout(Duration.ofMinutes(5))
-            .POST(HttpRequest.BodyPublishers.noBody())
+            .header("Content-Type", "application/json")
+            .POST(
+                HttpRequest.BodyPublishers.ofString(
+                    body.toJSONString(), StandardCharsets.UTF_8))
             .build();
-    HttpResponse<String> waited =
-        HTTP.send(waitRequest, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-    ensureSuccess(waited, "wait for OpenCode response");
+    HttpResponse<String> response =
+        HTTP.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+    ensureSuccess(response, "send OpenCode message");
 
-    HttpRequest messagesRequest =
-        requestBuilder(
-                BASE_URI.resolve(
-                    "/api/session/" + id + "/message?type=assistant&order=desc&limit=1"))
-            .timeout(Duration.ofSeconds(10))
-            .GET()
-            .build();
-    HttpResponse<String> messages =
-        HTTP.send(messagesRequest, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-    ensureSuccess(messages, "read OpenCode response");
-
-    String text = extractAssistantText(messages.body());
+    String text = extractAssistantText(response.body());
     return text.isBlank() ? "(OpenCode completed without a text response.)" : text;
   }
 
   static String extractAssistantText(String json) {
     JSONObject payload = JSON.parseObject(json);
+
+    String direct = extractTextParts(payload.getJSONArray("parts"));
+    if (!direct.isBlank()) {
+      return direct;
+    }
+
+    JSONObject dataObject = payload.getJSONObject("data");
+    if (dataObject != null) {
+      String dataParts = extractTextParts(dataObject.getJSONArray("parts"));
+      if (!dataParts.isBlank()) {
+        return dataParts;
+      }
+
+      String dataContent = extractTextParts(dataObject.getJSONArray("content"));
+      if (!dataContent.isBlank()) {
+        return dataContent;
+      }
+    }
+
     JSONArray data = payload.getJSONArray("data");
     if (data == null) {
       return "";
@@ -162,31 +174,37 @@ public final class OpenCodeRuntimeManager {
         continue;
       }
 
-      JSONArray content = message.getJSONArray("content");
-      if (content == null) {
-        return "";
+      String text = extractTextParts(message.getJSONArray("content"));
+      if (!text.isBlank()) {
+        return text;
       }
-
-      StringBuilder result = new StringBuilder();
-      for (int j = 0; j < content.size(); j++) {
-        JSONObject part = content.getJSONObject(j);
-        if (!"text".equals(part.getString("type"))) {
-          continue;
-        }
-
-        String text = part.getString("text");
-        if (text == null || text.isBlank()) {
-          continue;
-        }
-        if (!result.isEmpty()) {
-          result.append(System.lineSeparator());
-        }
-        result.append(text);
-      }
-      return result.toString();
     }
 
     return "";
+  }
+
+  private static String extractTextParts(JSONArray parts) {
+    if (parts == null) {
+      return "";
+    }
+
+    StringBuilder result = new StringBuilder();
+    for (int i = 0; i < parts.size(); i++) {
+      JSONObject part = parts.getJSONObject(i);
+      if (!"text".equals(part.getString("type"))) {
+        continue;
+      }
+
+      String text = part.getString("text");
+      if (text == null || text.isBlank()) {
+        continue;
+      }
+      if (!result.isEmpty()) {
+        result.append(System.lineSeparator());
+      }
+      result.append(text);
+    }
+    return result.toString();
   }
 
   private static String ensureSession() throws IOException, InterruptedException {
@@ -194,23 +212,23 @@ public final class OpenCodeRuntimeManager {
       return sessionId;
     }
 
-    JSONObject location = new JSONObject();
-    location.put("directory", KoLConstants.ROOT_LOCATION.getAbsolutePath());
-
     JSONObject body = new JSONObject();
     body.put("title", "Kolmaf-AI KoLmafia");
-    body.put("location", location);
 
-    HttpResponse<String> response = sendJson("POST", "/api/session", body.toJSONString());
+    HttpResponse<String> response = sendJson("POST", "/session", body.toJSONString());
     ensureSuccess(response, "create OpenCode session");
 
     JSONObject payload = JSON.parseObject(response.body());
-    JSONObject data = payload.getJSONObject("data");
-    if (data == null || data.get("id") == null) {
+    Object id = payload.get("id");
+    if (id == null) {
+      JSONObject data = payload.getJSONObject("data");
+      id = data == null ? null : data.get("id");
+    }
+    if (id == null) {
       throw new IOException("OpenCode session response did not contain a session id.");
     }
 
-    sessionId = data.get("id").toString();
+    sessionId = id.toString();
     return sessionId;
   }
 
