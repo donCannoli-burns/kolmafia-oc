@@ -81,7 +81,11 @@ public class OpenCodePanel extends JPanel {
         health -> {
           setBusy(false);
           updateStatus(health);
-          append("runtime", "Stopped the OpenCode process started by KoLmafia.");
+          append(
+              "runtime",
+              health.healthy()
+                  ? "Attached OpenCode server is still running; KoLmafia did not stop it."
+                  : "Stopped the OpenCode process started by KoLmafia.");
         });
   }
 
@@ -136,9 +140,11 @@ public class OpenCodePanel extends JPanel {
     this.start.setEnabled(!busy);
     this.stop.setEnabled(!busy);
     this.refresh.setEnabled(!busy);
-    this.newSession.setEnabled(!busy);
-    this.send.setEnabled(!busy && OpenCodeRuntimeManager.health().healthy());
     this.prompt.setEnabled(!busy);
+    if (busy) {
+      this.newSession.setEnabled(false);
+      this.send.setEnabled(false);
+    }
   }
 
   private void append(String who, String text) {
