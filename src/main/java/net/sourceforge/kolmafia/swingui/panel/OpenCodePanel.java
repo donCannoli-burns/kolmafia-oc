@@ -97,9 +97,9 @@ public class OpenCodePanel extends JPanel {
     setBusy(true);
     runAsync(
         OpenCodeRuntimeManager::newSession,
-        id -> {
+        ignored -> {
           setBusy(false);
-          append("runtime", "Created OpenCode session " + id + ".");
+          append("runtime", "Started a new OpenCode conversation.");
           refreshStatus();
         });
   }
