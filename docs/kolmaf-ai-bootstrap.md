@@ -16,6 +16,13 @@ OpenCode may be installed anywhere on `PATH`. Set `KOLMAF_OPENCODE_BIN` to an
 absolute executable path when KoLmafia is launched from a desktop environment
 whose `PATH` does not include OpenCode.
 
+Kolmaf-AI passes an explicit `--dir` to OpenCode so repo-local agents are
+discovered deterministically. The default workspace is the JVM current working
+directory (the source repository during `./gradlew run`). Set
+`KOLMAF_OPENCODE_WORKSPACE` to an absolute directory to choose a different
+workspace. This workspace selection does not grant access to external
+directories.
+
 ## Agent modes
 
 The repo-local agents live under `.opencode/agents/`.
