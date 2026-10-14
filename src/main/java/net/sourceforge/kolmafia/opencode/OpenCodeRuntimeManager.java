@@ -12,7 +12,9 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Base64;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 import net.sourceforge.kolmafia.KoLConstants;
 import net.sourceforge.kolmafia.RequestLogger;
@@ -116,6 +118,8 @@ public final class OpenCodeRuntimeManager {
     requireHealthy();
     String id = ensureSession();
 
+    int assistantCountBefore = readAssistantMessages(id).size();
+
     JSONObject textPart = new JSONObject();
     textPart.put("type", "text");
     textPart.put("text", prompt);
@@ -126,61 +130,93 @@ public final class OpenCodeRuntimeManager {
     JSONObject body = new JSONObject();
     body.put("parts", parts);
 
-    HttpRequest request =
-        requestBuilder(BASE_URI.resolve("/session/" + id + "/message"))
-            .timeout(Duration.ofMinutes(5))
-            .header("Content-Type", "application/json")
-            .POST(
-                HttpRequest.BodyPublishers.ofString(
-                    body.toJSONString(), StandardCharsets.UTF_8))
-            .build();
-    HttpResponse<String> response =
-        HTTP.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-    ensureSuccess(response, "send OpenCode message");
+    HttpResponse<String> admitted =
+        sendJson("POST", "/session/" + id + "/prompt_async", body.toJSONString());
+    ensureSuccess(admitted, "admit OpenCode prompt");
 
-    String text = extractAssistantText(response.body());
-    return text.isBlank() ? "(OpenCode completed without a text response.)" : text;
+    long deadline = System.nanoTime() + Duration.ofSeconds(90).toNanos();
+    String lastStatus = "unknown";
+
+    while (System.nanoTime() < deadline) {
+      List<String> assistants = readAssistantMessages(id);
+      if (assistants.size() > assistantCountBefore) {
+        String text = assistants.get(assistants.size() - 1);
+        return text.isBlank() ? "(OpenCode completed without a text response.)" : text;
+      }
+
+      lastStatus = readSessionStatus(id);
+      if (lastStatus.startsWith("retry:")) {
+        abortSession(id);
+        throw new IOException("OpenCode provider is retrying: " + lastStatus.substring(6).trim());
+      }
+
+      Thread.sleep(500);
+    }
+
+    abortSession(id);
+    throw new IOException(
+        "OpenCode did not produce an assistant response within 90 seconds"
+            + " (last session status: "
+            + lastStatus
+            + "). The session was aborted.");
   }
 
   static String extractAssistantText(String json) {
-    JSONObject payload = JSON.parseObject(json);
+    List<String> messages = extractAssistantMessages(json);
+    return messages.isEmpty() ? "" : messages.get(messages.size() - 1);
+  }
 
-    String direct = extractTextParts(payload.getJSONArray("parts"));
-    if (!direct.isBlank()) {
-      return direct;
-    }
+  private static List<String> readAssistantMessages(String id)
+      throws IOException, InterruptedException {
+    HttpRequest request =
+        requestBuilder(BASE_URI.resolve("/session/" + id + "/message?limit=50"))
+            .timeout(Duration.ofSeconds(5))
+            .GET()
+            .build();
+    HttpResponse<String> response =
+        HTTP.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+    ensureSuccess(response, "read OpenCode messages");
+    return extractAssistantMessages(response.body());
+  }
 
-    JSONObject dataObject = payload.getJSONObject("data");
-    if (dataObject != null) {
-      String dataParts = extractTextParts(dataObject.getJSONArray("parts"));
-      if (!dataParts.isBlank()) {
-        return dataParts;
+  static List<String> extractAssistantMessages(String json) {
+    Object parsed = JSON.parse(json);
+    JSONArray messages;
+
+    if (parsed instanceof JSONArray array) {
+      messages = array;
+    } else if (parsed instanceof JSONObject object) {
+      JSONArray data = object.getJSONArray("data");
+      if (data != null) {
+        messages = data;
+      } else {
+        String direct = extractTextParts(object.getJSONArray("parts"));
+        return direct.isBlank() ? List.of() : List.of(direct);
       }
-
-      String dataContent = extractTextParts(dataObject.getJSONArray("content"));
-      if (!dataContent.isBlank()) {
-        return dataContent;
-      }
+    } else {
+      return List.of();
     }
 
-    JSONArray data = payload.getJSONArray("data");
-    if (data == null) {
-      return "";
-    }
+    List<String> result = new ArrayList<>();
+    for (int i = 0; i < messages.size(); i++) {
+      JSONObject message = messages.getJSONObject(i);
+      JSONObject info = message.getJSONObject("info");
 
-    for (int i = 0; i < data.size(); i++) {
-      JSONObject message = data.getJSONObject(i);
-      if (!"assistant".equals(message.getString("type"))) {
+      String role = info == null ? message.getString("type") : info.getString("role");
+      if (!"assistant".equals(role)) {
         continue;
       }
 
-      String text = extractTextParts(message.getJSONArray("content"));
+      JSONArray parts = message.getJSONArray("parts");
+      if (parts == null) {
+        parts = message.getJSONArray("content");
+      }
+      String text = extractTextParts(parts);
       if (!text.isBlank()) {
-        return text;
+        result.add(text);
       }
     }
-
-    return "";
+    return result;
   }
 
   private static String extractTextParts(JSONArray parts) {
@@ -205,6 +241,42 @@ public final class OpenCodeRuntimeManager {
       result.append(text);
     }
     return result.toString();
+  }
+
+  private static String readSessionStatus(String id) throws IOException, InterruptedException {
+    HttpRequest request =
+        requestBuilder(BASE_URI.resolve("/session/status"))
+            .timeout(Duration.ofSeconds(5))
+            .GET()
+            .build();
+    HttpResponse<String> response =
+        HTTP.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+    ensureSuccess(response, "read OpenCode session status");
+
+    JSONObject statusMap = JSON.parseObject(response.body());
+    JSONObject status = statusMap.getJSONObject(id);
+    if (status == null) {
+      return "idle";
+    }
+
+    String type = status.getString("type");
+    if ("retry".equals(type)) {
+      String message = status.getString("message");
+      return "retry: " + (message == null ? "provider retry scheduled" : message);
+    }
+    return type == null ? "unknown" : type;
+  }
+
+  private static void abortSession(String id) {
+    try {
+      HttpRequest request =
+          requestBuilder(BASE_URI.resolve("/session/" + id + "/abort"))
+              .timeout(Duration.ofSeconds(5))
+              .POST(HttpRequest.BodyPublishers.noBody())
+              .build();
+      HTTP.send(request, HttpResponse.BodyHandlers.discarding());
+    } catch (Exception ignored) {
+    }
   }
 
   private static String ensureSession() throws IOException, InterruptedException {
