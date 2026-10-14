@@ -3,6 +3,7 @@ package net.sourceforge.kolmafia.opencode;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
 import java.io.BufferedReader;
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
@@ -48,7 +49,7 @@ public final class OpenCodeRuntimeManager {
     Process process = null;
     try {
       ProcessBuilder builder = new ProcessBuilder(executable(), "--version");
-      builder.directory(KoLConstants.ROOT_LOCATION);
+      builder.directory(workspace());
       builder.redirectErrorStream(true);
       process = builder.start();
 
@@ -105,7 +106,7 @@ public final class OpenCodeRuntimeManager {
     List<String> command = buildRunCommand(prompt, mode, existingSessionId);
 
     ProcessBuilder builder = new ProcessBuilder(command);
-    builder.directory(KoLConstants.ROOT_LOCATION);
+    builder.directory(workspace());
     builder.redirectErrorStream(true);
 
     Process process = builder.start();
@@ -189,6 +190,8 @@ public final class OpenCodeRuntimeManager {
     command.add("json");
     command.add("--agent");
     command.add(mode.cliName());
+    command.add("--dir");
+    command.add(workspace().getAbsolutePath());
 
     if (existingSessionId == null) {
       command.add("--title");
@@ -259,6 +262,15 @@ public final class OpenCodeRuntimeManager {
     if (!health().healthy()) {
       throw new IOException("OpenCode CLI is not available.");
     }
+  }
+
+  private static File workspace() {
+    String configured = System.getenv("KOLMAF_OPENCODE_WORKSPACE");
+    String path =
+        configured == null || configured.isBlank()
+            ? System.getProperty("user.dir")
+            : configured;
+    return new File(path).getAbsoluteFile();
   }
 
   private static String executable() {
