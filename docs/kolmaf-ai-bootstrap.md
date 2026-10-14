@@ -23,6 +23,11 @@ directory (the source repository during `./gradlew run`). Set
 workspace. This workspace selection does not grant access to external
 directories.
 
+OpenCode agent runs have a 30-minute hard timeout by default rather than the
+bootstrap's original two-minute ceiling. Set `KOLMAF_OPENCODE_TIMEOUT_MINUTES`
+to a non-negative integer to override it. A value of `0` disables the hard
+timeout so the child process may run until OpenCode exits on its own.
+
 ## Agent modes
 
 The repo-local agents live under `.opencode/agents/`.
