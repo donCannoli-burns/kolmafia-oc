@@ -2,11 +2,12 @@
 
 This fork adds a native **Kolmaf-AI** desktop frame next to the Graphical CLI.
 
-The first slice is intentionally small:
+The bootstrap is intentionally small:
 
-- launch or attach to an OpenCode server bound to `127.0.0.1:4096`;
-- create an OpenCode session rooted at the active KoLmafia directory;
-- send prompts and display the assistant's text response inside KoLmafia;
+- invoke the installed OpenCode CLI locally with `opencode run --format json`;
+- keep OpenCode's JSONL session ID so conversations can continue across prompts;
+- expose two explicit primary agents: **Plan** and **Build**;
+- default the desktop selector to **Plan**;
 - never auto-approve OpenCode permissions;
 - never expose a new KoL execution path;
 - never call the gCLI from the OpenCode frame.
@@ -14,6 +15,38 @@ The first slice is intentionally small:
 OpenCode may be installed anywhere on `PATH`. Set `KOLMAF_OPENCODE_BIN` to an
 absolute executable path when KoLmafia is launched from a desktop environment
 whose `PATH` does not include OpenCode.
+
+## Agent modes
+
+The repo-local agents live under `.opencode/agents/`.
+
+### `kolmaf-ai-plan`
+
+Plan is the default primary agent. It may inspect, reason, and run a narrow set
+of verification commands, but it denies workspace edits and denies external
+directories.
+
+### `kolmaf-ai-build`
+
+Build may edit files inside the active OpenCode workspace. It still denies
+external directories and does not gain live KoL or gCLI authority. Shell
+commands remain permission-gated except for a narrow verification allowlist.
+
+Plan and Build maintain separate OpenCode session IDs. Switching modes therefore
+does not silently reuse the other mode's conversation.
+
+The key boundary is:
+
+```text
+Plan  = inspect / reason / propose
+Build = modify the OpenCode workspace
+
+Neither mode = live KoL authority
+```
+
+Any future live KoL capability must be introduced separately through an
+explicit governed adapter with state binding, approval, and read-back
+verification.
 
 ## Intended next seam
 
