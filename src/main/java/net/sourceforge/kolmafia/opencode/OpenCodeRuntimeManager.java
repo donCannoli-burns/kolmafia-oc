@@ -98,6 +98,11 @@ public final class OpenCodeRuntimeManager {
     builder.redirectErrorStream(true);
 
     Process process = builder.start();
+    // OpenCode treats non-TTY stdin as an input stream. ProcessBuilder creates an open pipe by
+    // default, so explicitly send EOF; otherwise `opencode run` can finish its response but wait
+    // forever for more stdin.
+    process.getOutputStream().close();
+
     StringBuilder output = new StringBuilder();
 
     Thread reader =
@@ -123,7 +128,17 @@ public final class OpenCodeRuntimeManager {
       process.destroyForcibly();
       process.waitFor(2, TimeUnit.SECONDS);
       reader.join(1000);
-      throw new IOException("OpenCode run did not complete within 2 minutes.");
+
+      String partial;
+      synchronized (output) {
+        partial = output.toString();
+      }
+      RunResult partialResult = parseRunOutput(partial);
+      String detail =
+          !partialResult.text().isBlank()
+              ? " OpenCode had already produced: " + partialResult.text()
+              : diagnosticSuffix(partialResult.diagnostics());
+      throw new IOException("OpenCode run did not complete within 2 minutes." + detail);
     }
 
     reader.join(1000);
