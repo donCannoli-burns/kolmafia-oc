@@ -35,9 +35,11 @@ directories.
 
 ### `kolmaf-ai-build`
 
-Build may edit files inside the active OpenCode workspace. It still denies
-external directories and does not gain live KoL or gCLI authority. Shell
-commands remain permission-gated except for a narrow verification allowlist.
+Build may edit files inside the active OpenCode workspace and run normal
+development shell commands there. It still denies external directories and does
+not gain live KoL or gCLI authority. Destructive or remote Git operations,
+`sudo`, broad recursive deletion, and GitHub CLI commands remain explicitly
+denied.
 
 Plan and Build maintain separate OpenCode session IDs. Switching modes therefore
 does not silently reuse the other mode's conversation.
