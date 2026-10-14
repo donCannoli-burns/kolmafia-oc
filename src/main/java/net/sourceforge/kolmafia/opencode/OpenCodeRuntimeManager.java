@@ -14,6 +14,7 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 public final class OpenCodeRuntimeManager {
+  private static final int DEFAULT_RUN_TIMEOUT_MINUTES = 30;
   private static final Map<AgentMode, String> sessionIds = new EnumMap<>(AgentMode.class);
 
   private OpenCodeRuntimeManager() {}
@@ -135,7 +136,13 @@ public final class OpenCodeRuntimeManager {
                   }
                 });
 
-    if (!process.waitFor(2, TimeUnit.MINUTES)) {
+    int timeoutMinutes = runTimeoutMinutes();
+    boolean completed =
+        timeoutMinutes == 0
+            ? waitWithoutTimeout(process)
+            : process.waitFor(timeoutMinutes, TimeUnit.MINUTES);
+
+    if (!completed) {
       process.destroyForcibly();
       process.waitFor(2, TimeUnit.SECONDS);
       reader.join(1000);
@@ -145,11 +152,16 @@ public final class OpenCodeRuntimeManager {
         partial = output.toString();
       }
       RunResult partialResult = parseRunOutput(partial);
+      if (partialResult.sessionId() != null && !partialResult.sessionId().isBlank()) {
+        sessionIds.put(mode, partialResult.sessionId());
+      }
+
       String detail =
           !partialResult.text().isBlank()
               ? " OpenCode had already produced: " + partialResult.text()
               : diagnosticSuffix(partialResult.diagnostics());
-      throw new IOException("OpenCode run did not complete within 2 minutes." + detail);
+      throw new IOException(
+          "OpenCode run did not complete within " + timeoutMinutes + " minutes" + detail);
     }
 
     reader.join(1000);
@@ -261,6 +273,28 @@ public final class OpenCodeRuntimeManager {
     if (!health().healthy()) {
       throw new IOException("OpenCode CLI is not available.");
     }
+  }
+
+  static int parseRunTimeoutMinutes(String configured) {
+    if (configured == null || configured.isBlank()) {
+      return DEFAULT_RUN_TIMEOUT_MINUTES;
+    }
+
+    try {
+      int minutes = Integer.parseInt(configured.trim());
+      return minutes >= 0 ? minutes : DEFAULT_RUN_TIMEOUT_MINUTES;
+    } catch (NumberFormatException e) {
+      return DEFAULT_RUN_TIMEOUT_MINUTES;
+    }
+  }
+
+  private static int runTimeoutMinutes() {
+    return parseRunTimeoutMinutes(System.getenv("KOLMAF_OPENCODE_TIMEOUT_MINUTES"));
+  }
+
+  private static boolean waitWithoutTimeout(Process process) throws InterruptedException {
+    process.waitFor();
+    return true;
   }
 
   private static File workspace() {
