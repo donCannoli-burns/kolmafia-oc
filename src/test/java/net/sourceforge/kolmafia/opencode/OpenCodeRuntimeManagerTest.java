@@ -61,6 +61,7 @@ class OpenCodeRuntimeManagerTest {
 
     assertThat(command.contains("--agent"), is(true));
     assertThat(command.contains("kolmaf-ai-plan"), is(true));
+    assertThat(command.contains("--dir"), is(true));
     assertThat(command.contains("--title"), is(true));
     assertThat(command.contains("Kolmaf-AI Plan KoLmafia"), is(true));
     assertThat(command.contains("--session"), is(false));
@@ -73,6 +74,7 @@ class OpenCodeRuntimeManagerTest {
 
     assertThat(command.contains("--agent"), is(true));
     assertThat(command.contains("kolmaf-ai-build"), is(true));
+    assertThat(command.contains("--dir"), is(true));
     assertThat(command.contains("--session"), is(true));
     assertThat(command.contains("ses_build"), is(true));
     assertThat(command.contains("--title"), is(false));
