@@ -7,14 +7,38 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import net.sourceforge.kolmafia.KoLConstants;
 
 public final class OpenCodeRuntimeManager {
-  private static String sessionId;
+  private static final Map<AgentMode, String> sessionIds = new EnumMap<>(AgentMode.class);
 
   private OpenCodeRuntimeManager() {}
+
+  public enum AgentMode {
+    PLAN("Plan", "kolmaf-ai-plan"),
+    BUILD("Build", "kolmaf-ai-build");
+
+    private final String displayName;
+    private final String cliName;
+
+    AgentMode(String displayName, String cliName) {
+      this.displayName = displayName;
+      this.cliName = cliName;
+    }
+
+    public String cliName() {
+      return this.cliName;
+    }
+
+    @Override
+    public String toString() {
+      return this.displayName;
+    }
+  }
 
   public record Health(boolean healthy, String version, boolean managed) {}
 
@@ -64,34 +88,21 @@ public final class OpenCodeRuntimeManager {
   }
 
   public static synchronized void stop() {
-    sessionId = null;
+    sessionIds.clear();
   }
 
-  public static synchronized String newSession() throws IOException {
+  public static synchronized String newSession(AgentMode mode) throws IOException {
     requireHealthy();
-    sessionId = null;
+    sessionIds.remove(mode);
     return "";
   }
 
-  public static synchronized String sendPrompt(String prompt)
+  public static synchronized String sendPrompt(String prompt, AgentMode mode)
       throws IOException, InterruptedException {
     requireHealthy();
 
-    List<String> command = new ArrayList<>();
-    command.add(executable());
-    command.add("run");
-    command.add("--format");
-    command.add("json");
-
-    if (sessionId == null) {
-      command.add("--title");
-      command.add("Kolmaf-AI KoLmafia");
-    } else {
-      command.add("--session");
-      command.add(sessionId);
-    }
-
-    command.add(prompt);
+    String existingSessionId = sessionIds.get(mode);
+    List<String> command = buildRunCommand(prompt, mode, existingSessionId);
 
     ProcessBuilder builder = new ProcessBuilder(command);
     builder.directory(KoLConstants.ROOT_LOCATION);
@@ -150,7 +161,7 @@ public final class OpenCodeRuntimeManager {
 
     RunResult result = parseRunOutput(raw);
     if (result.sessionId() != null && !result.sessionId().isBlank()) {
-      sessionId = result.sessionId();
+      sessionIds.put(mode, result.sessionId());
     }
 
     if (process.exitValue() != 0) {
@@ -167,6 +178,28 @@ public final class OpenCodeRuntimeManager {
     }
 
     return result.text();
+  }
+
+  static List<String> buildRunCommand(
+      String prompt, AgentMode mode, String existingSessionId) {
+    List<String> command = new ArrayList<>();
+    command.add(executable());
+    command.add("run");
+    command.add("--format");
+    command.add("json");
+    command.add("--agent");
+    command.add(mode.cliName());
+
+    if (existingSessionId == null) {
+      command.add("--title");
+      command.add("Kolmaf-AI " + mode + " KoLmafia");
+    } else {
+      command.add("--session");
+      command.add(existingSessionId);
+    }
+
+    command.add(prompt);
+    return command;
   }
 
   static RunResult parseRunOutput(String output) {
