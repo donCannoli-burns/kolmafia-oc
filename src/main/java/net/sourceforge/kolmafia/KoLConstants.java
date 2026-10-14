@@ -93,6 +93,7 @@ public interface KoLConstants extends UtilityConstants {
     {"Relay Server", "LocalRelayServer"},
     {"Purchases", "MallSearchFrame"},
     {"Graphical CLI", "CommandDisplayFrame"},
+    {"Kolmaf-AI", "OpenCodeFrame"},
     {"Daily Deeds", "CharSheetFrame"},
     {"Item Manager", "ItemManageFrame"},
     {"Gear Changer", "GearChangeFrame"},

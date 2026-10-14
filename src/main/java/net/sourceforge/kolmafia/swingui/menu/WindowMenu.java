@@ -24,8 +24,9 @@ public class WindowMenu extends MenuItemList<String> {
 
   @Override
   public JComponent[] getHeaders() {
-    JComponent[] headers = new JComponent[1];
-    headers[0] = new DisplayFrameMenuItem("Show All Displays", null);
+    JComponent[] headers = new JComponent[2];
+    headers[0] = new DisplayFrameMenuItem("Kolmaf-AI", "OpenCodeFrame");
+    headers[1] = new DisplayFrameMenuItem("Show All Displays", null);
     return headers;
   }
 }
