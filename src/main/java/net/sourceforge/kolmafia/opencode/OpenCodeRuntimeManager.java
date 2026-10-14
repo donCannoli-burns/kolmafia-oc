@@ -1,7 +1,6 @@
 package net.sourceforge.kolmafia.opencode;
 
 import com.alibaba.fastjson2.JSON;
-import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -32,6 +31,8 @@ public final class OpenCodeRuntimeManager {
   private OpenCodeRuntimeManager() {}
 
   public record Health(boolean healthy, String version, boolean managed) {}
+
+  static record RunResult(String sessionId, String text, String diagnostics) {}
 
   public static Health health() {
     try {
@@ -107,267 +108,155 @@ public final class OpenCodeRuntimeManager {
     }
   }
 
-  public static synchronized String newSession() throws IOException, InterruptedException {
+  public static synchronized String newSession() throws IOException {
     requireHealthy();
     sessionId = null;
-    return ensureSession();
+    return "";
   }
 
   public static synchronized String sendPrompt(String prompt)
       throws IOException, InterruptedException {
     requireHealthy();
-    String id = ensureSession();
 
-    int assistantCountBefore = readAssistantMessages(id).size();
+    List<String> command = new ArrayList<>();
+    command.add(executable());
+    command.add("run");
+    command.add("--attach");
+    command.add(BASE_URI.toString());
+    command.add("--format");
+    command.add("json");
+    command.add("--dir");
+    command.add(KoLConstants.ROOT_LOCATION.getAbsolutePath());
 
-    JSONObject textPart = new JSONObject();
-    textPart.put("type", "text");
-    textPart.put("text", prompt);
-
-    JSONArray parts = new JSONArray();
-    parts.add(textPart);
-
-    JSONObject body = new JSONObject();
-    body.put("parts", parts);
-
-    HttpResponse<String> admitted =
-        sendJson("POST", "/session/" + id + "/prompt_async", body.toJSONString());
-    ensureSuccess(admitted, "admit OpenCode prompt");
-
-    long deadline = System.nanoTime() + Duration.ofSeconds(90).toNanos();
-    String lastStatus = "unknown";
-
-    while (System.nanoTime() < deadline) {
-      List<String> assistants = readAssistantMessages(id);
-      if (assistants.size() > assistantCountBefore) {
-        String text = assistants.get(assistants.size() - 1);
-        return text.isBlank() ? "(OpenCode completed without a text response.)" : text;
-      }
-
-      lastStatus = readSessionStatus(id);
-      if (lastStatus.startsWith("retry:")) {
-        abortSession(id);
-        throw new IOException("OpenCode provider is retrying: " + lastStatus.substring(6).trim());
-      }
-
-      String pending = readPendingInteraction(id);
-      if (!pending.isBlank()) {
-        abortSession(id);
-        throw new IOException(
-            "OpenCode is waiting for " + pending + ". Kolmaf-AI does not auto-approve requests.");
-      }
-
-      Thread.sleep(500);
-    }
-
-    abortSession(id);
-    throw new IOException(
-        "OpenCode did not produce an assistant response within 90 seconds"
-            + " (last session status: "
-            + lastStatus
-            + "). The session was aborted.");
-  }
-
-  static String extractAssistantText(String json) {
-    List<String> messages = extractAssistantMessages(json);
-    return messages.isEmpty() ? "" : messages.get(messages.size() - 1);
-  }
-
-  private static List<String> readAssistantMessages(String id)
-      throws IOException, InterruptedException {
-    HttpRequest request =
-        requestBuilder(BASE_URI.resolve("/session/" + id + "/message?limit=50"))
-            .timeout(Duration.ofSeconds(5))
-            .GET()
-            .build();
-    HttpResponse<String> response =
-        HTTP.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-    ensureSuccess(response, "read OpenCode messages");
-    return extractAssistantMessages(response.body());
-  }
-
-  static List<String> extractAssistantMessages(String json) {
-    Object parsed = JSON.parse(json);
-    JSONArray messages;
-
-    if (parsed instanceof JSONArray array) {
-      messages = array;
-    } else if (parsed instanceof JSONObject object) {
-      JSONArray data = object.getJSONArray("data");
-      if (data != null) {
-        messages = data;
-      } else {
-        String direct = extractTextParts(object.getJSONArray("parts"));
-        return direct.isBlank() ? List.of() : List.of(direct);
-      }
+    if (sessionId == null) {
+      command.add("--title");
+      command.add("Kolmaf-AI KoLmafia");
     } else {
-      return List.of();
+      command.add("--session");
+      command.add(sessionId);
     }
 
-    List<String> result = new ArrayList<>();
-    for (int i = 0; i < messages.size(); i++) {
-      JSONObject message = messages.getJSONObject(i);
-      JSONObject info = message.getJSONObject("info");
+    command.add(prompt);
 
-      String role = info == null ? message.getString("type") : info.getString("role");
-      if (!"assistant".equals(role)) {
+    ProcessBuilder builder = new ProcessBuilder(command);
+    builder.directory(KoLConstants.ROOT_LOCATION);
+    builder.redirectErrorStream(true);
+
+    Process process = builder.start();
+    StringBuilder output = new StringBuilder();
+
+    Thread reader =
+        Thread.ofVirtual()
+            .name("OpenCodeRunOutput")
+            .start(
+                () -> {
+                  try (BufferedReader lines =
+                      new BufferedReader(
+                          new InputStreamReader(
+                              process.getInputStream(), StandardCharsets.UTF_8))) {
+                    String line;
+                    while ((line = lines.readLine()) != null) {
+                      synchronized (output) {
+                        output.append(line).append(System.lineSeparator());
+                      }
+                    }
+                  } catch (IOException ignored) {
+                  }
+                });
+
+    if (!process.waitFor(2, TimeUnit.MINUTES)) {
+      process.destroyForcibly();
+      process.waitFor(2, TimeUnit.SECONDS);
+      reader.join(1000);
+      throw new IOException("OpenCode attached run did not complete within 2 minutes.");
+    }
+
+    reader.join(1000);
+
+    String raw;
+    synchronized (output) {
+      raw = output.toString();
+    }
+
+    RunResult result = parseRunOutput(raw);
+    if (result.sessionId() != null && !result.sessionId().isBlank()) {
+      sessionId = result.sessionId();
+    }
+
+    if (process.exitValue() != 0) {
+      throw new IOException(
+          "OpenCode attached run failed (exit "
+              + process.exitValue()
+              + ")"
+              + diagnosticSuffix(result.diagnostics()));
+    }
+
+    if (result.text().isBlank()) {
+      throw new IOException(
+          "OpenCode attached run completed without assistant text"
+              + diagnosticSuffix(result.diagnostics()));
+    }
+
+    return result.text();
+  }
+
+  static RunResult parseRunOutput(String output) {
+    String foundSession = null;
+    StringBuilder text = new StringBuilder();
+    StringBuilder diagnostics = new StringBuilder();
+
+    for (String line : output.split("\\R")) {
+      String trimmed = line.trim();
+      if (trimmed.isEmpty()) {
         continue;
       }
 
-      JSONArray parts = message.getJSONArray("parts");
-      if (parts == null) {
-        parts = message.getJSONArray("content");
-      }
-      String text = extractTextParts(parts);
-      if (!text.isBlank()) {
-        result.add(text);
-      }
-    }
-    return result;
-  }
-
-  private static String extractTextParts(JSONArray parts) {
-    if (parts == null) {
-      return "";
-    }
-
-    StringBuilder result = new StringBuilder();
-    for (int i = 0; i < parts.size(); i++) {
-      JSONObject part = parts.getJSONObject(i);
-      if (!"text".equals(part.getString("type"))) {
+      JSONObject event;
+      try {
+        event = JSON.parseObject(trimmed);
+      } catch (Exception e) {
+        appendLine(diagnostics, trimmed);
         continue;
       }
 
-      String text = part.getString("text");
-      if (text == null || text.isBlank()) {
-        continue;
+      String eventSession = event.getString("sessionID");
+      if (eventSession != null && !eventSession.isBlank()) {
+        foundSession = eventSession;
       }
-      if (!result.isEmpty()) {
-        result.append(System.lineSeparator());
-      }
-      result.append(text);
-    }
-    return result.toString();
-  }
 
-  private static String readSessionStatus(String id) throws IOException, InterruptedException {
-    HttpRequest request =
-        requestBuilder(BASE_URI.resolve("/session/status"))
-            .timeout(Duration.ofSeconds(5))
-            .GET()
-            .build();
-    HttpResponse<String> response =
-        HTTP.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-    ensureSuccess(response, "read OpenCode session status");
-
-    JSONObject statusMap = JSON.parseObject(response.body());
-    JSONObject status = statusMap.getJSONObject(id);
-    if (status == null) {
-      return "idle";
-    }
-
-    String type = status.getString("type");
-    if ("retry".equals(type)) {
-      String message = status.getString("message");
-      return "retry: " + (message == null ? "provider retry scheduled" : message);
-    }
-    return type == null ? "unknown" : type;
-  }
-
-  private static String readPendingInteraction(String id)
-      throws IOException, InterruptedException {
-    if (hasPendingForSession("/permission", id)) {
-      return "a permission decision";
-    }
-    if (hasPendingForSession("/question", id)) {
-      return "user input";
-    }
-    return "";
-  }
-
-  private static boolean hasPendingForSession(String path, String id)
-      throws IOException, InterruptedException {
-    HttpRequest request =
-        requestBuilder(BASE_URI.resolve(path))
-            .timeout(Duration.ofSeconds(5))
-            .GET()
-            .build();
-    HttpResponse<String> response =
-        HTTP.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-    ensureSuccess(response, "read OpenCode pending requests");
-
-    Object parsed = JSON.parse(response.body());
-    JSONArray requests = null;
-    if (parsed instanceof JSONArray array) {
-      requests = array;
-    } else if (parsed instanceof JSONObject object) {
-      requests = object.getJSONArray("data");
-    }
-    if (requests == null) {
-      return false;
-    }
-
-    for (int i = 0; i < requests.size(); i++) {
-      JSONObject pending = requests.getJSONObject(i);
-      if (id.equals(pending.getString("sessionID"))) {
-        return true;
+      String type = event.getString("type");
+      if ("text".equals(type)) {
+        JSONObject part = event.getJSONObject("part");
+        if (part != null) {
+          appendLine(text, part.getString("text"));
+        }
+      } else if ("error".equals(type)) {
+        Object error = event.get("error");
+        appendLine(diagnostics, error == null ? trimmed : error.toString());
       }
     }
-    return false;
+
+    return new RunResult(foundSession, text.toString(), diagnostics.toString());
   }
 
-  private static void abortSession(String id) {
-    try {
-      HttpRequest request =
-          requestBuilder(BASE_URI.resolve("/session/" + id + "/abort"))
-              .timeout(Duration.ofSeconds(5))
-              .POST(HttpRequest.BodyPublishers.noBody())
-              .build();
-      HTTP.send(request, HttpResponse.BodyHandlers.discarding());
-    } catch (Exception ignored) {
+  private static void appendLine(StringBuilder target, String value) {
+    if (value == null || value.isBlank()) {
+      return;
     }
+    if (!target.isEmpty()) {
+      target.append(System.lineSeparator());
+    }
+    target.append(value.trim());
   }
 
-  private static String ensureSession() throws IOException, InterruptedException {
-    if (sessionId != null) {
-      return sessionId;
-    }
-
-    JSONObject body = new JSONObject();
-    body.put("title", "Kolmaf-AI KoLmafia");
-
-    HttpResponse<String> response = sendJson("POST", "/session", body.toJSONString());
-    ensureSuccess(response, "create OpenCode session");
-
-    JSONObject payload = JSON.parseObject(response.body());
-    Object id = payload.get("id");
-    if (id == null) {
-      JSONObject data = payload.getJSONObject("data");
-      id = data == null ? null : data.get("id");
-    }
-    if (id == null) {
-      throw new IOException("OpenCode session response did not contain a session id.");
-    }
-
-    sessionId = id.toString();
-    return sessionId;
+  private static String diagnosticSuffix(String diagnostics) {
+    return diagnostics == null || diagnostics.isBlank() ? "." : ": " + diagnostics.trim();
   }
 
   private static void requireHealthy() throws IOException {
     if (!health().healthy()) {
       throw new IOException("OpenCode is not running. Start the runtime first.");
     }
-  }
-
-  private static HttpResponse<String> sendJson(String method, String path, String body)
-      throws IOException, InterruptedException {
-    HttpRequest request =
-        requestBuilder(BASE_URI.resolve(path))
-            .timeout(Duration.ofSeconds(30))
-            .header("Content-Type", "application/json")
-            .method(method, HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8))
-            .build();
-    return HTTP.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
   }
 
   private static HttpRequest.Builder requestBuilder(URI uri) {
@@ -386,22 +275,6 @@ public final class OpenCodeRuntimeManager {
         Base64.getEncoder()
             .encodeToString((username + ":" + password).getBytes(StandardCharsets.UTF_8));
     return builder.header("Authorization", "Basic " + encoded);
-  }
-
-  private static void ensureSuccess(HttpResponse<String> response, String operation)
-      throws IOException {
-    if (response.statusCode() / 100 == 2) {
-      return;
-    }
-
-    String body = response.body() == null ? "" : response.body().trim();
-    throw new IOException(
-        "OpenCode failed to "
-            + operation
-            + " (HTTP "
-            + response.statusCode()
-            + ")"
-            + (body.isEmpty() ? "" : ": " + body));
   }
 
   private static boolean isManagedProcessAlive() {
