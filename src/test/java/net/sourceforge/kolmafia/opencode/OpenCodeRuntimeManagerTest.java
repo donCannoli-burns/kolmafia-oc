@@ -47,6 +47,32 @@ class OpenCodeRuntimeManagerTest {
   }
 
   @Test
+  void extractsLatestAssistantTextFromMessageList() {
+    String payload =
+        """
+        [
+          {
+            "info": {"role": "user"},
+            "parts": [{"type": "text", "text": "hello"}]
+          },
+          {
+            "info": {"role": "assistant"},
+            "parts": [
+              {"type": "reasoning", "text": "private scratch"},
+              {"type": "text", "text": "first"}
+            ]
+          },
+          {
+            "info": {"role": "assistant"},
+            "parts": [{"type": "text", "text": "latest"}]
+          }
+        ]
+        """;
+
+    assertThat(OpenCodeRuntimeManager.extractAssistantText(payload), is("latest"));
+  }
+
+  @Test
   void returnsEmptyStringWhenThereIsNoAssistantMessage() {
     String payload =
         """
