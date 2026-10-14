@@ -12,7 +12,6 @@ import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
-import net.sourceforge.kolmafia.KoLConstants;
 
 public final class OpenCodeRuntimeManager {
   private static final Map<AgentMode, String> sessionIds = new EnumMap<>(AgentMode.class);
