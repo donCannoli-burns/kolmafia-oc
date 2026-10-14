@@ -150,6 +150,13 @@ public final class OpenCodeRuntimeManager {
         throw new IOException("OpenCode provider is retrying: " + lastStatus.substring(6).trim());
       }
 
+      String pending = readPendingInteraction(id);
+      if (!pending.isBlank()) {
+        abortSession(id);
+        throw new IOException(
+            "OpenCode is waiting for " + pending + ". Kolmaf-AI does not auto-approve requests.");
+      }
+
       Thread.sleep(500);
     }
 
@@ -265,6 +272,48 @@ public final class OpenCodeRuntimeManager {
       return "retry: " + (message == null ? "provider retry scheduled" : message);
     }
     return type == null ? "unknown" : type;
+  }
+
+  private static String readPendingInteraction(String id)
+      throws IOException, InterruptedException {
+    if (hasPendingForSession("/permission", id)) {
+      return "a permission decision";
+    }
+    if (hasPendingForSession("/question", id)) {
+      return "user input";
+    }
+    return "";
+  }
+
+  private static boolean hasPendingForSession(String path, String id)
+      throws IOException, InterruptedException {
+    HttpRequest request =
+        requestBuilder(BASE_URI.resolve(path))
+            .timeout(Duration.ofSeconds(5))
+            .GET()
+            .build();
+    HttpResponse<String> response =
+        HTTP.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+    ensureSuccess(response, "read OpenCode pending requests");
+
+    Object parsed = JSON.parse(response.body());
+    JSONArray requests = null;
+    if (parsed instanceof JSONArray array) {
+      requests = array;
+    } else if (parsed instanceof JSONObject object) {
+      requests = object.getJSONArray("data");
+    }
+    if (requests == null) {
+      return false;
+    }
+
+    for (int i = 0; i < requests.size(); i++) {
+      JSONObject pending = requests.getJSONObject(i);
+      if (id.equals(pending.getString("sessionID"))) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private static void abortSession(String id) {
