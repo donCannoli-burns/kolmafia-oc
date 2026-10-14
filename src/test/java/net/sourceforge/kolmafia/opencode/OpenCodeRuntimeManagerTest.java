@@ -7,85 +7,48 @@ import org.junit.jupiter.api.Test;
 
 class OpenCodeRuntimeManagerTest {
   @Test
-  void extractsAssistantTextAndIgnoresReasoning() {
-    String payload =
+  void parsesAttachedRunTextAndSession() {
+    String output =
         """
-        {
-          "data": [
-            {
-              "type": "assistant",
-              "content": [
-                {"type": "reasoning", "text": "private scratch"},
-                {"type": "text", "text": "Hello"},
-                {"type": "text", "text": "KoLmafia"}
-              ]
-            }
-          ]
-        }
+        {"type":"step_start","timestamp":1,"sessionID":"ses_abc","part":{"type":"step-start"}}
+        {"type":"text","timestamp":2,"sessionID":"ses_abc","part":{"type":"text","text":"KoLmafia OpenCode bridge alive"}}
+        {"type":"step_finish","timestamp":3,"sessionID":"ses_abc","part":{"type":"step-finish"}}
         """;
 
-    assertThat(OpenCodeRuntimeManager.extractAssistantText(payload), is("Hello\nKoLmafia"));
+    var result = OpenCodeRuntimeManager.parseRunOutput(output);
+
+    assertThat(result.sessionId(), is("ses_abc"));
+    assertThat(result.text(), is("KoLmafia OpenCode bridge alive"));
+    assertThat(result.diagnostics(), is(""));
   }
 
-
   @Test
-  void extractsAssistantTextFromSynchronousMessageResponse() {
-    String payload =
+  void keepsNonJsonOutputAsDiagnostics() {
+    String output =
         """
-        {
-          "info": {"role": "assistant"},
-          "parts": [
-            {"type": "reasoning", "text": "private scratch"},
-            {"type": "text", "text": "KoLmafia OpenCode bridge alive"}
-          ]
-        }
+        warning: attached client diagnostic
+        {"type":"error","timestamp":2,"sessionID":"ses_abc","error":"provider failed"}
         """;
 
+    var result = OpenCodeRuntimeManager.parseRunOutput(output);
+
+    assertThat(result.sessionId(), is("ses_abc"));
+    assertThat(result.text(), is(""));
     assertThat(
-        OpenCodeRuntimeManager.extractAssistantText(payload),
-        is("KoLmafia OpenCode bridge alive"));
+        result.diagnostics(),
+        is("warning: attached client diagnostic" + System.lineSeparator() + "provider failed"));
   }
 
   @Test
-  void extractsLatestAssistantTextFromMessageList() {
-    String payload =
+  void combinesCompletedTextParts() {
+    String output =
         """
-        [
-          {
-            "info": {"role": "user"},
-            "parts": [{"type": "text", "text": "hello"}]
-          },
-          {
-            "info": {"role": "assistant"},
-            "parts": [
-              {"type": "reasoning", "text": "private scratch"},
-              {"type": "text", "text": "first"}
-            ]
-          },
-          {
-            "info": {"role": "assistant"},
-            "parts": [{"type": "text", "text": "latest"}]
-          }
-        ]
+        {"type":"text","timestamp":1,"sessionID":"ses_abc","part":{"type":"text","text":"Hello"}}
+        {"type":"text","timestamp":2,"sessionID":"ses_abc","part":{"type":"text","text":"KoLmafia"}}
         """;
 
-    assertThat(OpenCodeRuntimeManager.extractAssistantText(payload), is("latest"));
-  }
+    var result = OpenCodeRuntimeManager.parseRunOutput(output);
 
-  @Test
-  void returnsEmptyStringWhenThereIsNoAssistantMessage() {
-    String payload =
-        """
-        {
-          "data": [
-            {
-              "type": "user",
-              "content": [{"type": "text", "text": "hello"}]
-            }
-          ]
-        }
-        """;
-
-    assertThat(OpenCodeRuntimeManager.extractAssistantText(payload), is(""));
+    assertThat(result.text(), is("Hello" + System.lineSeparator() + "KoLmafia"));
   }
 }
