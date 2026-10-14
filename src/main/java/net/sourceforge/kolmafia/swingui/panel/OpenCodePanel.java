@@ -11,11 +11,15 @@ import javax.swing.JScrollPane;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
 import javax.swing.SwingWorker;
+import javax.swing.Timer;
 import net.sourceforge.kolmafia.opencode.OpenCodeRuntimeManager;
 import net.sourceforge.kolmafia.opencode.OpenCodeRuntimeManager.Health;
 
 public class OpenCodePanel extends JPanel {
+  private static final String[] ACTIVITY_FRAMES = {"working.", "working..", "working...", "working...."};
+
   private final JLabel status = new JLabel("OpenCode: checking...");
+  private final JLabel activity = new JLabel();
   private final JTextArea transcript = new JTextArea();
   private final JTextField prompt = new JTextField();
   private final JButton send = new JButton("send");
@@ -23,9 +27,20 @@ public class OpenCodePanel extends JPanel {
   private final JButton stop = new JButton("reset");
   private final JButton refresh = new JButton("refresh");
   private final JButton newSession = new JButton("new session");
+  private final Timer activityTimer;
+  private int activityFrame;
 
   public OpenCodePanel() {
     super(new BorderLayout(6, 6));
+
+    this.activityTimer =
+        new Timer(
+            350,
+            e -> {
+              this.activityFrame = (this.activityFrame + 1) % ACTIVITY_FRAMES.length;
+              this.activity.setText(ACTIVITY_FRAMES[this.activityFrame]);
+            });
+    this.activityTimer.setRepeats(true);
 
     this.transcript.setEditable(false);
     this.transcript.setLineWrap(true);
@@ -39,6 +54,7 @@ public class OpenCodePanel extends JPanel {
     controls.add(this.stop);
     controls.add(this.refresh);
     controls.add(this.newSession);
+    controls.add(this.activity);
     controls.add(this.status);
 
     JPanel entry = new JPanel(new BorderLayout(4, 0));
@@ -137,9 +153,16 @@ public class OpenCodePanel extends JPanel {
     this.stop.setEnabled(!busy);
     this.refresh.setEnabled(!busy);
     this.prompt.setEnabled(!busy);
+
     if (busy) {
       this.newSession.setEnabled(false);
       this.send.setEnabled(false);
+      this.activityFrame = 0;
+      this.activity.setText(ACTIVITY_FRAMES[this.activityFrame]);
+      this.activityTimer.restart();
+    } else {
+      this.activityTimer.stop();
+      this.activity.setText("");
     }
   }
 
