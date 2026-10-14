@@ -19,8 +19,8 @@ public class OpenCodePanel extends JPanel {
   private final JTextArea transcript = new JTextArea();
   private final JTextField prompt = new JTextField();
   private final JButton send = new JButton("send");
-  private final JButton start = new JButton("start");
-  private final JButton stop = new JButton("stop");
+  private final JButton start = new JButton("check");
+  private final JButton stop = new JButton("reset");
   private final JButton refresh = new JButton("refresh");
   private final JButton newSession = new JButton("new session");
 
