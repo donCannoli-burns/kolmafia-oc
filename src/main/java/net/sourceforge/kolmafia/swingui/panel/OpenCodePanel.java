@@ -32,7 +32,7 @@ public class OpenCodePanel extends JPanel {
     this.transcript.setWrapStyleWord(true);
     this.transcript.append(
         "Kolmaf-AI bootstrap v0\n"
-            + "OpenCode is localhost-only. This console does not grant KoL execution authority.\n\n");
+            + "OpenCode runs as a local child process. This console does not grant KoL execution authority.\n\n");
 
     JPanel controls = new JPanel(new FlowLayout(FlowLayout.LEFT));
     controls.add(this.start);
@@ -61,13 +61,13 @@ public class OpenCodePanel extends JPanel {
 
   private void startRuntime() {
     setBusy(true);
-    append("runtime", "Starting OpenCode on 127.0.0.1:4096...");
+    append("runtime", "Checking local OpenCode CLI...");
     runAsync(
         OpenCodeRuntimeManager::start,
         health -> {
           setBusy(false);
           updateStatus(health);
-          append("runtime", "OpenCode is ready.");
+          append("runtime", "OpenCode CLI is ready.");
         });
   }
 
@@ -81,11 +81,7 @@ public class OpenCodePanel extends JPanel {
         health -> {
           setBusy(false);
           updateStatus(health);
-          append(
-              "runtime",
-              health.healthy()
-                  ? "Attached OpenCode server is still running; KoLmafia did not stop it."
-                  : "Stopped the OpenCode process started by KoLmafia.");
+          append("runtime", "Cleared the current OpenCode conversation.");
         });
   }
 
@@ -125,9 +121,8 @@ public class OpenCodePanel extends JPanel {
 
   private void updateStatus(Health health) {
     if (health.healthy()) {
-      String ownership = health.managed() ? "managed" : "attached";
       String version = health.version().isBlank() ? "" : " v" + health.version();
-      this.status.setText("OpenCode" + version + ": ready (" + ownership + ")");
+      this.status.setText("OpenCode" + version + ": ready (local CLI)");
       this.send.setEnabled(true);
       this.newSession.setEnabled(true);
     } else {
