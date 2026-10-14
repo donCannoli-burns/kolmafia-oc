@@ -5,6 +5,7 @@ import java.awt.FlowLayout;
 import java.util.concurrent.Callable;
 import java.util.function.Consumer;
 import javax.swing.JButton;
+import javax.swing.JComboBox;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
@@ -13,6 +14,7 @@ import javax.swing.JTextField;
 import javax.swing.SwingWorker;
 import javax.swing.Timer;
 import net.sourceforge.kolmafia.opencode.OpenCodeRuntimeManager;
+import net.sourceforge.kolmafia.opencode.OpenCodeRuntimeManager.AgentMode;
 import net.sourceforge.kolmafia.opencode.OpenCodeRuntimeManager.Health;
 
 public class OpenCodePanel extends JPanel {
@@ -27,6 +29,7 @@ public class OpenCodePanel extends JPanel {
   private final JButton stop = new JButton("reset");
   private final JButton refresh = new JButton("refresh");
   private final JButton newSession = new JButton("new session");
+  private final JComboBox<AgentMode> agentMode = new JComboBox<>(AgentMode.values());
   private final Timer activityTimer;
   private int activityFrame;
 
@@ -54,6 +57,8 @@ public class OpenCodePanel extends JPanel {
     controls.add(this.stop);
     controls.add(this.refresh);
     controls.add(this.newSession);
+    controls.add(new JLabel("Agent:"));
+    controls.add(this.agentMode);
     controls.add(this.activity);
     controls.add(this.status);
 
@@ -69,6 +74,8 @@ public class OpenCodePanel extends JPanel {
     this.stop.addActionListener(e -> stopRuntime());
     this.refresh.addActionListener(e -> refreshStatus());
     this.newSession.addActionListener(e -> createNewSession());
+    this.agentMode.addActionListener(
+        e -> append("runtime", "Agent mode: " + selectedAgent() + "."));
     this.send.addActionListener(e -> sendPrompt());
     this.prompt.addActionListener(e -> sendPrompt());
 
@@ -106,12 +113,13 @@ public class OpenCodePanel extends JPanel {
   }
 
   private void createNewSession() {
+    AgentMode mode = selectedAgent();
     setBusy(true);
     runAsync(
-        OpenCodeRuntimeManager::newSession,
+        () -> OpenCodeRuntimeManager.newSession(mode),
         ignored -> {
           setBusy(false);
-          append("runtime", "Started a new OpenCode conversation.");
+          append("runtime", "Started a new " + mode + " conversation.");
           refreshStatus();
         });
   }
@@ -122,15 +130,16 @@ public class OpenCodePanel extends JPanel {
       return;
     }
 
+    AgentMode mode = selectedAgent();
     this.prompt.setText("");
     append("you", text);
     setBusy(true);
 
     runAsync(
-        () -> OpenCodeRuntimeManager.sendPrompt(text),
+        () -> OpenCodeRuntimeManager.sendPrompt(text, mode),
         response -> {
           setBusy(false);
-          append("OpenCode", response);
+          append("OpenCode[" + mode + "]", response);
           refreshStatus();
         });
   }
@@ -153,6 +162,7 @@ public class OpenCodePanel extends JPanel {
     this.stop.setEnabled(!busy);
     this.refresh.setEnabled(!busy);
     this.prompt.setEnabled(!busy);
+    this.agentMode.setEnabled(!busy);
 
     if (busy) {
       this.newSession.setEnabled(false);
@@ -164,6 +174,11 @@ public class OpenCodePanel extends JPanel {
       this.activityTimer.stop();
       this.activity.setText("");
     }
+  }
+
+  private AgentMode selectedAgent() {
+    Object selected = this.agentMode.getSelectedItem();
+    return selected instanceof AgentMode mode ? mode : AgentMode.PLAN;
   }
 
   private void append(String who, String text) {
