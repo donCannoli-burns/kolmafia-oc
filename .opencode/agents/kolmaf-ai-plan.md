@@ -10,7 +10,6 @@ permission:
     "git status*": allow
     "git diff*": allow
     "git log*": allow
-    "git branch*": allow
     "git rev-parse*": allow
     "./gradlew test*": allow
     "./gradlew compileJava*": allow
