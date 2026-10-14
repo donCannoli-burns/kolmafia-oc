@@ -79,4 +79,19 @@ class OpenCodeRuntimeManagerTest {
     assertThat(command.contains("ses_build"), is(true));
     assertThat(command.contains("--title"), is(false));
   }
+  @Test
+  void defaultsRunTimeoutToThirtyMinutes() {
+    assertThat(OpenCodeRuntimeManager.parseRunTimeoutMinutes(null), is(30));
+    assertThat(OpenCodeRuntimeManager.parseRunTimeoutMinutes(""), is(30));
+    assertThat(OpenCodeRuntimeManager.parseRunTimeoutMinutes("not-a-number"), is(30));
+    assertThat(OpenCodeRuntimeManager.parseRunTimeoutMinutes("-1"), is(30));
+  }
+
+  @Test
+  void acceptsConfiguredRunTimeoutAndZeroForUnlimited() {
+    assertThat(OpenCodeRuntimeManager.parseRunTimeoutMinutes("15"), is(15));
+    assertThat(OpenCodeRuntimeManager.parseRunTimeoutMinutes(" 45 "), is(45));
+    assertThat(OpenCodeRuntimeManager.parseRunTimeoutMinutes("0"), is(0));
+  }
+
 }
