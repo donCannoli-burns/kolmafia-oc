@@ -28,16 +28,17 @@ public final class OpenCodeRuntimeManager {
       builder.redirectErrorStream(true);
       process = builder.start();
 
+      if (!process.waitFor(5, TimeUnit.SECONDS)) {
+        process.destroyForcibly();
+        process.waitFor(2, TimeUnit.SECONDS);
+        return new Health(false, "", false);
+      }
+
       String output;
       try (BufferedReader reader =
           new BufferedReader(
               new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
         output = reader.readLine();
-      }
-
-      if (!process.waitFor(5, TimeUnit.SECONDS)) {
-        process.destroyForcibly();
-        return new Health(false, "", false);
       }
 
       if (process.exitValue() != 0) {
